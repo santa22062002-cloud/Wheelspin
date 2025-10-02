@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Vòng quay FDcare</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;800&display=swap" rel="stylesheet">
+  <style>
+    body{
+      display:flex;flex-direction:column;align-items:center;
+      font-family:'Poppins',sans-serif;
+      background:#f3f3f3;padding:20px;
+    }
+    canvas{margin-top:10px;border-radius:8px;}
+    .controls{margin-top:14px;display:flex;gap:10px;}
+    button{
+      padding:10px 18px;font-size:16px;
+      border-radius:8px;border:none;cursor:pointer;
+      background:#ff5722;color:#fff;font-weight:700
+    }
+    button.reset{background:#2196F3}
+    #popup{
+      position:fixed;inset:0;background:rgba(0,0,0,0.45);
+      display:none;align-items:center;justify-content:center;z-index:1000
+    }
+    #popup .content{
+      background:#fff;padding:26px;border-radius:12px;min-width:260px;
+      text-align:center;box-shadow:0 8px 24px rgba(0,0,0,0.15)
+    }
+    #popup button{margin-top:12px;background:#4CAF50}
+    #confetti{
+      position:fixed;top:0;left:0;width:100%;height:100%;
+      pointer-events:none;z-index:2000;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="wheel" width="500" height="500"></canvas>
+
+  <div class="controls">
+    <button id="spinBtn">Quay</button>
+    <button class="reset" id="resetBtn">Reset</button>
+  </div>
+
+  <div id="popup">
+    <div class="content">
+      <h3 style="margin:0 0 8px 0">🎉 Chúc mừng!</h3>
+      <div id="popup-prize" style="font-weight:700"></div>
+      <button onclick="closePopup()">OK</button>
+    </div>
+  </div>
+
+  <canvas id="confetti"></canvas>
+
+  <script>
+    const initialPrizes = [
+      { name: "Tượng tô", quantity: 10, color: "#ff4d8c" },
+      { name: "Túi", quantity: 22, color: "#500eb9" },
+      { name: "Gấu bông", quantity: 11, color: "#ff93b5" },
+      { name: "Lồng đèn", quantity: 90, color: "#653af3" },
+      { name: "Túi Cấp cứu", quantity: 1, color: "#70188e" }
+    ];
+
+    function expandAndShufflePrizes(base){
+      const pool = [];
+      for(const p of base){
+        const count = (p.name==="Túi Cấp cứu"? 1 : 2); 
+        for(let i=0;i<count;i++) pool.push({...p});
+      }
+      const result = [];
+      let index = 0;
+      while(pool.length>0){
+        result.push(pool.splice(index % pool.length,1)[0]);
+        index++;
+      }
+      return result;
+    }
+
+    let prizes = expandAndShufflePrizes(initialPrizes);
+    let realPrizes = JSON.parse(JSON.stringify(initialPrizes));
+
+    const canvas = document.getElementById("wheel");
+    const ctx = canvas.getContext("2d");
+    const popup = document.getElementById("popup");
+    const popupPrize = document.getElementById("popup-prize");
+    const spinBtn = document.getElementById("spinBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    let startAngle = 0;
+    let spinning = false;
+    const pointerDeg = 270;
+
+    function drawWheel() {
+      const cx = canvas.width/2, cy = canvas.height/2, r = 200;
+      const n = prizes.length;
+      const arc = Math.PI*2 / n;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      for (let i=0;i<n;i++){
+        const prize = prizes[i];
+        const real = realPrizes.find(p=>p.name===prize.name);
+        const angle = startAngle + i*arc;
+        ctx.beginPath();
+        ctx.moveTo(cx,cy);
+        ctx.arc(cx,cy,r,angle,angle+arc);
+        ctx.closePath();
+        ctx.fillStyle = real.quantity > 0 ? prize.color : "rgba(180,180,180,0.35)";
+        ctx.fill();
+
+        ctx.save();
+        ctx.translate(cx,cy);
+        ctx.rotate(angle + arc/2);
+        ctx.textAlign = "right";
+        ctx.font = "bold 18px Poppins, sans-serif";
+        ctx.fillStyle = real.quantity > 0 ? "#fff" : "#ccc";
+        ctx.fillText(prize.name, r - 20, 8);
+        ctx.restore();
+      }
+
+      // pointer
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.moveTo(cx - 12, cy - r + 10);
+      ctx.lineTo(cx + 12, cy - r + 10);
+      ctx.lineTo(cx, cy - r + 40);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function weightedRandomPrize(){
+      const total = realPrizes.reduce((s,p)=> s + (p.quantity>0? p.quantity: 0), 0);
+      if (total <= 0) return null;
+      let r = Math.floor(Math.random() * total);
+      let cum = 0;
+      for (const p of realPrizes){
+        cum += (p.quantity>0? p.quantity: 0);
+        if (r < cum) return p;
+      }
+      return null;
+    }
+
+    function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+    async function startSpin(){
+      if (spinning) return;
+      const total = realPrizes.reduce((s,p)=> s + (p.quantity>0? p.quantity: 0), 0);
+      if (total === 0){ alert("Đã hết giải!"); return; }
+      spinning = true;
+
+      const target = weightedRandomPrize();
+      if (!target){ spinning=false; return; }
+
+      const targetIndexes = prizes.map((p,i)=> p.name===target.name? i : -1).filter(i=>i>=0);
+      const index = targetIndexes[Math.floor(Math.random()*targetIndexes.length)];
+
+      const arcDeg = 360 / prizes.length;
+      const randomAngleInSlice = index * arcDeg + Math.random()*arcDeg;
+      let desiredStartDeg = (pointerDeg - randomAngleInSlice);
+      desiredStartDeg = (desiredStartDeg % 360 + 360) % 360;
+      const spins = 6;
+      const finalAngleDeg = spins*360 + desiredStartDeg;
+
+      const duration = 4200 + Math.random()*900;
+      const startTime = performance.now();
+
+      function frame(now){
+        const t = Math.min(1, (now - startTime)/duration);
+        const eased = easeOutCubic(t);
+        const currentDeg = eased * finalAngleDeg;
+        startAngle = (currentDeg * Math.PI/180) % (Math.PI*2);
+        drawWheel();
+        if(t<1){ requestAnimationFrame(frame); }
+        else {
+          startAngle = (finalAngleDeg * Math.PI/180) % (Math.PI*2);
+          drawWheel();
+          target.quantity = Math.max(0, target.quantity - 1);
+
+          // log số lượng còn lại
+          console.log("Còn lại:", realPrizes.map(p => `${p.name}: ${p.quantity}`).join(" | "));
+
+          popupPrize.innerText = "Bạn trúng: " + target.name;
+          popup.style.display = "flex";
+          launchConfetti();
+          spinning=false;
+        }
+      }
+      requestAnimationFrame(frame);
+    }
+
+    function closePopup(){ popup.style.display="none"; drawWheel(); }
+    function resetPrizes(){
+      realPrizes = JSON.parse(JSON.stringify(initialPrizes));
+      prizes = expandAndShufflePrizes(initialPrizes);
+      drawWheel();
+
+      // log lại sau khi reset
+      console.log("Reset:", realPrizes.map(p => `${p.name}: ${p.quantity}`).join(" | "));
+    }
+
+    spinBtn.addEventListener('click', startSpin);
+    resetBtn.addEventListener('click', resetPrizes);
+
+    // confetti
+    const confettiCanvas = document.getElementById("confetti");
+    const confCtx = confettiCanvas.getContext("2d");
+    confettiCanvas.width = window.innerWidth;
+    confettiCanvas.height = window.innerHeight;
+    let confettiParticles = [];
+
+    function launchConfetti(){
+      confettiParticles = [];
+      for(let i=0;i<150;i++){
+        confettiParticles.push({
+          x: Math.random()*confettiCanvas.width,
+          y: Math.random()*-confettiCanvas.height,
+          r: Math.random()*6+2,
+          d: Math.random()*0.05+0.02,
+          color: `hsl(${Math.random()*360},100%,50%)`,
+          tilt: Math.random()*10-10
+        });
+      }
+      requestAnimationFrame(updateConfetti);
+      setTimeout(()=>confettiParticles=[],4000);
+    }
+
+    function updateConfetti(){
+      confCtx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+      confettiParticles.forEach(p=>{
+        p.y += 3;
+        p.x += Math.sin(p.tilt);
+        p.tilt += p.d;
+        confCtx.fillStyle = p.color;
+        confCtx.beginPath();
+        confCtx.arc(p.x,p.y,p.r,0,Math.PI*2);
+        confCtx.fill();
+      });
+      if(confettiParticles.length>0) requestAnimationFrame(updateConfetti);
+    }
+
+    drawWheel();
+    // log lần đầu tiên
+    console.log("Bắt đầu:", realPrizes.map(p => `${p.name}: ${p.quantity}`).join(" | "));
+  </script>
+</body>
+</html>
